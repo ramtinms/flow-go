@@ -964,8 +964,9 @@ access(all) contract EVM {
 
     /// Calls a function with the given data.
     /// The execution is limited by the given amount of gas
+    /// This call is only possible by the service account
     access(account)
-    fun govCall(
+    fun governanceDirectCall(
         from: EVMAddress,
         to: EVMAddress,
         data: [UInt8],
@@ -973,7 +974,7 @@ access(all) contract EVM {
         value: Balance
     ): Result {
         return InternalEVM.call(
-            from: from,
+            from: from.bytes,
             to: to.bytes,
             data: data,
             gasLimit: gasLimit,
