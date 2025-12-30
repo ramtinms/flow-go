@@ -3801,6 +3801,87 @@ func TestEVMFileSystemContract(t *testing.T) {
 	})
 }
 
+func TestGovernanceDirectCall(t *testing.T) {
+	t.Parallel()
+
+	chain := flow.Emulator.Chain()
+	sc := systemcontracts.SystemContractsForChain(chain.ChainID())
+
+	RunWithNewEnvironment(t,
+		chain, func(
+			ctx fvm.Context,
+			vm fvm.VM,
+			snapshot snapshot.SnapshotTree,
+			testContract *TestContract,
+			testAccount *EOATestAccount,
+		) {
+			code := []byte(fmt.Sprintf(
+				`
+				import EVM from %s
+				import FlowToken from %s
+
+				transaction() {
+					prepare(account: auth(BorrowValue) &Account, sender: [UInt8; 20], receiver: [UInt8; 20]) {
+						let admin = account.storage
+							.borrow<&FlowToken.Administrator>(from: /storage/flowTokenAdmin)!
+
+						let minter <- admin.createNewMinter(allowedAmount: 2.34)
+						let vault <- minter.mintTokens(amount: 2.34)
+						destroy minter
+
+						let senderEVMAddress = EVM.EVMAddress(bytes: sender)
+						let receiverEVMAddress = EVM.EVMAddress(bytes: receiver)
+
+						senderEVMAddress.deposit(from: <-vault)
+
+						let res = EVM.governanceDirectCall(
+							from: senderEVMAddress, 
+							to: receiverEVMAddress,
+							data: [],
+							gasLimit: 100_000,
+							value: EVM.Balance(attoflow: 1230000000000000000),
+						)
+						
+						assert(res.status == EVM.Status.successful, message: "unexpected status")
+						assert(res.errorCode == 0, message: "unexpected error code")
+						assert(res.deployedContract == nil, message: "unexpected deployed contract")
+					}
+				}
+				`,
+				sc.EVMContract.Address.HexWithPrefix(),
+				sc.FlowToken.Address.HexWithPrefix(),
+			))
+
+			txBody, err := flow.NewTransactionBodyBuilder().
+				SetScript(code).
+				SetPayer(sc.FlowServiceAccount.Address).
+				AddAuthorizer(sc.FlowServiceAccount.Address).
+				Build()
+			require.NoError(t, err)
+
+			tx := fvm.Transaction(txBody, 0)
+
+			_, output, err := vm.Run(
+				ctx,
+				tx,
+				snapshot)
+			require.NoError(t, err)
+			require.NoError(t, output.Err)
+
+			withdrawEvent := output.Events[7]
+
+			ev, err := events.FlowEventToCadenceEvent(withdrawEvent)
+			require.NoError(t, err)
+
+			evPayload, err := events.DecodeFLOWTokensWithdrawnEventPayload(ev)
+			require.NoError(t, err)
+
+			// 2.34 - 1.23 = 1.11
+			expectedBalanceAfterWithdraw := big.NewInt(1_110_000_000_000_000_000)
+			require.Equal(t, expectedBalanceAfterWithdraw, evPayload.BalanceAfterInAttoFlow.Value)
+		})
+}
+
 func createAndFundFlowAccount(
 	t *testing.T,
 	ctx fvm.Context,
