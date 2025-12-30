@@ -962,6 +962,25 @@ access(all) contract EVM {
         ): @{FungibleToken.Vault}
     }
 
+    /// Calls a function with the given data.
+    /// The execution is limited by the given amount of gas
+    access(account)
+    fun govCall(
+        from: EVMAddress,
+        to: EVMAddress,
+        data: [UInt8],
+        gasLimit: UInt64,
+        value: Balance
+    ): Result {
+        return InternalEVM.call(
+            from: from,
+            to: to.bytes,
+            data: data,
+            gasLimit: gasLimit,
+            value: value.attoflow
+        ) as! Result
+    }
+
     /// Interface which captures a Capability to the bridge Accessor,
     /// saving it within the BridgeRouter resource
     access(all) resource interface BridgeRouter {
